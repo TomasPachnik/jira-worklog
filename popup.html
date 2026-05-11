@@ -13,8 +13,8 @@
           <input id="baseUrlInput" type="text" placeholder="https://your-company.atlassian.net" />
         </label>
         <label class="field">
-          <span>Worklog user (optional)</span>
-          <input id="userInput" type="text" list="userSuggestions" placeholder="Type at least 2 chars to search users" />
+          <span>Worklog users (optional, comma-separated)</span>
+          <input id="userInput" type="text" list="userSuggestions" placeholder="e.g. john.doe, jane.smith — type 2+ chars to autocomplete" />
           <datalist id="userSuggestions"></datalist>
         </label>
         <div class="row">
@@ -41,6 +41,7 @@
           <thead>
             <tr>
               <th>Date</th>
+              <th>User</th>
               <th>Issue</th>
               <th>Summary</th>
               <th>Logged time</th>
@@ -53,6 +54,7 @@
 
       <footer class="footer">
         <button id="exportBtn" type="button" disabled>Export CSV</button>
+        <button id="exportSummaryBtn" type="button" disabled>Export Summary CSV</button>
       </footer>
     </main>
 
