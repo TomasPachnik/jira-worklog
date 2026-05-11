@@ -18,7 +18,7 @@ const WORKLOG_CONCURRENCY = 4;
 const apiVersionCache = new Map<string, 3 | 2>();
 const USER_SUGGESTION_LIMIT = 20;
 
-function normalizeBaseUrl(baseUrl: string): string {
+export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, '');
 }
 
@@ -26,8 +26,17 @@ function escapeJqlValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function makeJql(range: MonthRange, author?: string): string {
-  const authorClause = author ? `worklogAuthor = "${escapeJqlValue(author)}"` : 'worklogAuthor = currentUser()';
+function makeJql(range: MonthRange, authors?: string[]): string {
+  let authorClause: string;
+  if (authors && authors.length > 0) {
+    if (authors.length === 1) {
+      authorClause = `worklogAuthor = "${escapeJqlValue(authors[0])}"`;
+    } else {
+      authorClause = `worklogAuthor in (${authors.map((a) => `"${escapeJqlValue(a)}"`).join(', ')})`;
+    }
+  } else {
+    authorClause = 'worklogAuthor = currentUser()';
+  }
   return [
     authorClause,
     `AND worklogDate >= "${range.startDateJql}"`,
@@ -130,6 +139,10 @@ function authorMatchesIdentity(author: JiraWorklogAuthor | undefined, identity: 
   return candidates.includes(target);
 }
 
+function authorMatchesAnyIdentity(author: JiraWorklogAuthor | undefined, identities: string[]): boolean {
+  return identities.some((id) => authorMatchesIdentity(author, id));
+}
+
 async function getCurrentUser(baseUrl: string, apiVersion: 3 | 2): Promise<JiraUser> {
   return jiraFetch<JiraUser>(baseUrl, `/rest/api/${apiVersion}/myself`);
 }
@@ -143,7 +156,7 @@ async function searchIssues(baseUrl: string, apiVersion: 3 | 2, jql: string): Pr
       jql,
       startAt,
       maxResults: SEARCH_PAGE_SIZE,
-      fields: ['summary', 'project'],
+      fields: ['summary', 'project', 'resolution'],
     };
 
     const page = await jiraFetch<JiraIssueSearchResponse>(baseUrl, `/rest/api/${apiVersion}/search`, {
@@ -204,6 +217,10 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper:
 }
 
 function toRow(issue: JiraIssue, worklog: JiraWorklog): WorklogRow {
+  const authorDisplayName =
+    worklog.author.displayName ?? worklog.author.name ?? worklog.author.accountId ?? worklog.author.key ?? '';
+  const authorKey =
+    worklog.author.accountId ?? worklog.author.key ?? worklog.author.name ?? worklog.author.displayName ?? '';
   return {
     date: toLocalDateString(worklog.started),
     issueKey: issue.key,
@@ -212,6 +229,9 @@ function toRow(issue: JiraIssue, worklog: JiraWorklog): WorklogRow {
     timeSpentSeconds: worklog.timeSpentSeconds,
     project: issue.fields.project?.key ?? issue.fields.project?.name ?? '',
     started: worklog.started,
+    authorDisplayName,
+    authorKey,
+    resolutionName: issue.fields.resolution?.name,
   };
 }
 
@@ -308,13 +328,26 @@ export async function searchJiraUsers(baseUrl: string, query: string): Promise<J
 export async function fetchMonthlyWorklogs(
   baseUrl: string,
   range: MonthRange,
-  author?: string,
+  authors?: string[],
 ): Promise<MonthlyWorklogResult> {
   const apiVersion = await detectApiVersion(baseUrl);
-  const selectedAuthor = author?.trim();
+  const selectedAuthors = (authors ?? []).map((a) => a.trim()).filter(Boolean);
 
-  const [user, issues] = selectedAuthor
-    ? await Promise.all([Promise.resolve(undefined), searchIssues(baseUrl, apiVersion, makeJql(range, selectedAuthor))])
+  // Deduplicate case-insensitively
+  const seen = new Set<string>();
+  const uniqueAuthors: string[] = [];
+  for (const a of selectedAuthors) {
+    const key = normalizeIdentity(a);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueAuthors.push(a);
+    }
+  }
+
+  const hasAuthors = uniqueAuthors.length > 0;
+
+  const [user, issues] = hasAuthors
+    ? await Promise.all([Promise.resolve(undefined), searchIssues(baseUrl, apiVersion, makeJql(range, uniqueAuthors))])
     : await Promise.all([
         getCurrentUser(baseUrl, apiVersion),
         searchIssues(baseUrl, apiVersion, makeJql(range)),
@@ -328,8 +361,8 @@ export async function fetchMonthlyWorklogs(
 
     return issueWorklogs
       .filter((worklog) => {
-        if (selectedAuthor) {
-          if (!authorMatchesIdentity(worklog.author, selectedAuthor)) {
+        if (hasAuthors) {
+          if (!authorMatchesAnyIdentity(worklog.author, uniqueAuthors)) {
             return false;
           }
         } else if (!user || !userMatchesAuthor(user, worklog.author)) {
@@ -345,9 +378,24 @@ export async function fetchMonthlyWorklogs(
   const rows = rowGroups.flat().sort((a, b) => new Date(a.started).getTime() - new Date(b.started).getTime());
   const totalSeconds = rows.reduce((sum, row) => sum + row.timeSpentSeconds, 0);
 
+  let selectedUserLabels: string[];
+  if (hasAuthors) {
+    // Resolve display names from fetched worklog data; fall back to the raw identifier
+    const identityToDisplay = new Map<string, string>();
+    for (const row of rows) {
+      const rowKey = normalizeIdentity(row.authorKey);
+      if (!identityToDisplay.has(rowKey) && row.authorDisplayName) {
+        identityToDisplay.set(rowKey, row.authorDisplayName);
+      }
+    }
+    selectedUserLabels = uniqueAuthors.map((a) => identityToDisplay.get(normalizeIdentity(a)) ?? a);
+  } else {
+    selectedUserLabels = [user?.displayName ?? 'Current user'];
+  }
+
   return {
     user,
-    selectedUserLabel: selectedAuthor || user?.displayName || 'Current user',
+    selectedUserLabels,
     rows,
     totalSeconds,
     issuesScanned: issues.length,

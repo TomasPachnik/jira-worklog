@@ -1,4 +1,4 @@
-import { buildCsv, downloadCsv } from '../lib/csv';
+import { buildCsv, buildSummaryCsv, downloadCsv } from '../lib/csv';
 import { getMonthOptions, getMonthRange } from '../lib/dateUtils';
 import { fetchMonthlyWorklogs, searchJiraUsers } from '../lib/jiraApi';
 import type { WorklogRow } from '../types';
@@ -6,7 +6,7 @@ import './popup.css';
 
 const STORAGE_KEYS = {
   baseUrl: 'jiraBaseUrl',
-  user: 'jiraWorklogUser',
+  users: 'jiraWorklogUsers',
   monthOffset: 'monthOffset',
 } as const;
 
@@ -33,10 +33,27 @@ const status = getRequiredElement<HTMLElement>('#status');
 const worklogTable = getRequiredElement<HTMLTableElement>('#worklogTable');
 const worklogTableBody = getRequiredElement<HTMLTableSectionElement>('#worklogTableBody');
 const exportBtn = getRequiredElement<HTMLButtonElement>('#exportBtn');
+const exportSummaryBtn = getRequiredElement<HTMLButtonElement>('#exportSummaryBtn');
 
 let currentRows: WorklogRow[] = [];
 let currentTotalSeconds = 0;
+let currentBaseUrl = '';
 let userSearchTimer: number | undefined;
+
+function parseUsersInput(value: string): string[] {
+  return value.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function getLastToken(value: string): { token: string; before: string } {
+  const lastComma = value.lastIndexOf(',');
+  if (lastComma === -1) {
+    return { token: value.trim(), before: '' };
+  }
+  return {
+    token: value.slice(lastComma + 1).trim(),
+    before: value.slice(0, lastComma + 1) + ' ',
+  };
+}
 
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -87,6 +104,7 @@ function renderTable(rows: WorklogRow[]): void {
       (row) => `
       <tr>
         <td>${row.date}</td>
+        <td>${escapeHtml(row.authorDisplayName)}</td>
         <td>${row.issueKey}</td>
         <td>${escapeHtml(row.summary)}</td>
         <td>${row.timeSpent}</td>
@@ -127,7 +145,7 @@ async function getActiveTabJiraBaseUrl(): Promise<string | null> {
 async function saveSettings(): Promise<void> {
   await chrome.storage.local.set({
     [STORAGE_KEYS.baseUrl]: sanitizeBaseUrl(baseUrlInput.value),
-    [STORAGE_KEYS.user]: userInput.value.trim(),
+    [STORAGE_KEYS.users]: parseUsersInput(userInput.value),
     [STORAGE_KEYS.monthOffset]: Number(monthOffsetSelect.value),
   });
 }
@@ -139,32 +157,44 @@ function buildExportFileName(offset: number): string {
   return `jira-worklog-${yyyy}-${mm}.csv`;
 }
 
-function renderUserSuggestions(options: Array<{ value: string; label: string }>): void {
+function buildSummaryExportFileName(offset: number): string {
+  const range = getMonthRange(offset);
+  const yyyy = range.start.getFullYear();
+  const mm = String(range.start.getMonth() + 1).padStart(2, '0');
+  return `jira-worklog-summary-${yyyy}-${mm}.csv`;
+}
+
+function renderUserSuggestions(options: Array<{ value: string; label: string }>, before = ''): void {
   userSuggestions.innerHTML = options
-    .map((option) => `<option value="${escapeHtml(option.value)}" label="${escapeHtml(option.label)}"></option>`)
+    .map((option) => `<option value="${escapeHtml(before + option.value)}" label="${escapeHtml(option.label)}"></option>`)
     .join('');
 }
 
 async function loadUserSuggestions(): Promise<void> {
   const baseUrl = sanitizeBaseUrl(baseUrlInput.value);
-  const query = userInput.value.trim();
+  const { token, before } = getLastToken(userInput.value);
 
-  if (!baseUrl || query.length < 2) {
+  if (!baseUrl || token.length < 2) {
     renderUserSuggestions([]);
     return;
   }
 
   try {
-    const options = await searchJiraUsers(baseUrl, query);
-    renderUserSuggestions(options);
+    const options = await searchJiraUsers(baseUrl, token);
+    renderUserSuggestions(options, before);
   } catch {
     renderUserSuggestions([]);
   }
 }
 
+function setExportButtonsEnabled(enabled: boolean): void {
+  exportBtn.disabled = !enabled;
+  exportSummaryBtn.disabled = !enabled;
+}
+
 async function loadAndRender(): Promise<void> {
   const baseUrl = sanitizeBaseUrl(baseUrlInput.value);
-  const selectedUser = userInput.value.trim();
+  const authors = parseUsersInput(userInput.value);
   const offset = Number(monthOffsetSelect.value);
   const range = getMonthRange(offset);
 
@@ -176,8 +206,9 @@ async function loadAndRender(): Promise<void> {
     metaInfo.textContent = '';
     currentRows = [];
     currentTotalSeconds = 0;
+    currentBaseUrl = '';
     clearTable();
-    exportBtn.disabled = true;
+    setExportButtonsEnabled(false);
     return;
   }
 
@@ -185,26 +216,27 @@ async function loadAndRender(): Promise<void> {
 
   setStatus('Loading worklogs...', 'loading');
   clearTable();
-  exportBtn.disabled = true;
+  setExportButtonsEnabled(false);
 
   try {
-    const result = await fetchMonthlyWorklogs(baseUrl, range, selectedUser || undefined);
+    const result = await fetchMonthlyWorklogs(baseUrl, range, authors);
     currentRows = result.rows;
     currentTotalSeconds = result.totalSeconds;
+    currentBaseUrl = baseUrl;
 
     totalTime.textContent = formatDuration(result.totalSeconds);
-    metaInfo.textContent = `User: ${result.selectedUserLabel} | Issues scanned: ${result.issuesScanned}`;
+    metaInfo.textContent = `Users: ${result.selectedUserLabels.join(', ')} | Issues scanned: ${result.issuesScanned}`;
 
     if (result.rows.length === 0) {
       setStatus('No worklogs found for selected month.', 'empty');
       clearTable();
-      exportBtn.disabled = true;
+      setExportButtonsEnabled(false);
       return;
     }
 
     setStatus('', 'hidden');
     renderTable(result.rows);
-    exportBtn.disabled = false;
+    setExportButtonsEnabled(true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setStatus(`Failed to load data: ${message}`, 'error');
@@ -212,8 +244,9 @@ async function loadAndRender(): Promise<void> {
     metaInfo.textContent = '';
     currentRows = [];
     currentTotalSeconds = 0;
+    currentBaseUrl = '';
     clearTable();
-    exportBtn.disabled = true;
+    setExportButtonsEnabled(false);
   }
 }
 
@@ -226,11 +259,23 @@ function initMonthSelect(): void {
 async function init(): Promise<void> {
   initMonthSelect();
 
-  const stored = await chrome.storage.local.get([STORAGE_KEYS.baseUrl, STORAGE_KEYS.user, STORAGE_KEYS.monthOffset]);
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.baseUrl,
+    STORAGE_KEYS.users,
+    'jiraWorklogUser', // legacy single-user key
+    STORAGE_KEYS.monthOffset,
+  ]);
   const tabBaseUrl = await getActiveTabJiraBaseUrl();
 
   baseUrlInput.value = sanitizeBaseUrl(stored[STORAGE_KEYS.baseUrl] ?? tabBaseUrl ?? '');
-  userInput.value = String(stored[STORAGE_KEYS.user] ?? '');
+
+  // Migrate from old single-user storage to array
+  const storedUsers: string[] = Array.isArray(stored[STORAGE_KEYS.users])
+    ? (stored[STORAGE_KEYS.users] as string[])
+    : stored['jiraWorklogUser']
+      ? [String(stored['jiraWorklogUser'])]
+      : [];
+  userInput.value = storedUsers.join(', ');
 
   const offset = Number(stored[STORAGE_KEYS.monthOffset]);
   monthOffsetSelect.value = Number.isFinite(offset) && offset >= 0 && offset <= MAX_MONTH_OFFSET ? String(offset) : '0';
@@ -239,7 +284,18 @@ async function init(): Promise<void> {
     void loadAndRender();
   });
 
-  userInput.addEventListener('input', () => {
+  userInput.addEventListener('input', (event) => {
+    // When datalist replaces a token, append comma-space to separate from next token
+    const inputEvent = event as InputEvent;
+    if (inputEvent.inputType === 'insertReplacementText') {
+      const { before } = getLastToken(userInput.value);
+      // If before is not empty, this was mid-list selection; user already has the value
+      // Just append ', ' so the next user can be typed
+      if (!userInput.value.endsWith(', ')) {
+        userInput.value = userInput.value + ', ';
+      }
+    }
+
     if (userSearchTimer) {
       window.clearTimeout(userSearchTimer);
     }
@@ -272,6 +328,12 @@ async function init(): Promise<void> {
     const offsetValue = Number(monthOffsetSelect.value);
     const csv = buildCsv(currentRows, currentTotalSeconds);
     downloadCsv(buildExportFileName(offsetValue), csv);
+  });
+
+  exportSummaryBtn.addEventListener('click', () => {
+    const offsetValue = Number(monthOffsetSelect.value);
+    const csv = buildSummaryCsv(currentRows, currentBaseUrl);
+    downloadCsv(buildSummaryExportFileName(offsetValue), csv);
   });
 
   await loadAndRender();

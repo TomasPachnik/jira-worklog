@@ -25,6 +25,7 @@ export interface JiraIssue {
   fields: {
     summary: string;
     project?: JiraProject;
+    resolution?: { name?: string };
   };
 }
 
@@ -65,11 +66,14 @@ export interface WorklogRow {
   timeSpentSeconds: number;
   project: string;
   started: string;
+  authorDisplayName: string;
+  authorKey: string;
+  resolutionName?: string;
 }
 
 export interface MonthlyWorklogResult {
   user?: JiraUser;
-  selectedUserLabel: string;
+  selectedUserLabels: string[];
   rows: WorklogRow[];
   totalSeconds: number;
   issuesScanned: number;
