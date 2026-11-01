@@ -167,12 +167,6 @@ function resolveColumns(header: string[], spec: ColumnSpec): Record<keyof Column
   return columns;
 }
 
-function stripIssueKey(description: string, issueKey: string): string {
-  const index = description.indexOf(issueKey);
-  const rest = description.slice(0, index) + description.slice(index + issueKey.length);
-  return rest.replace(/^[\s\-–—:|]+/, '').trim();
-}
-
 export function parseImportCsv(text: string, source: ImportSource): ImportRow[] {
   const isKimai = source === 'kimai';
   const spec = isKimai ? KIMAI_COLUMNS : STANDARD_COLUMNS;
@@ -214,8 +208,9 @@ export function parseImportCsv(text: string, source: ImportSource): ImportRow[] 
     let issueKey: string;
     let comment: string;
     if (isKimai) {
+      // Kimai description is just "<KEY> - <task name>"; it is not copied to the worklog comment
       issueKey = ISSUE_KEY_PATTERN.exec(description)?.[0] ?? '';
-      comment = issueKey ? stripIssueKey(description, issueKey) : description;
+      comment = '';
     } else {
       issueKey = cell(record, columns.issueKey).toUpperCase();
       comment = description;

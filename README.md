@@ -165,7 +165,7 @@ date;issueKey;start;timeSpent;comment
 Use the CSV export from Kimai as is. Used columns:
 
 - `Date` (`YYYY-MM-DD`), `From` (`HH:MM`), `Duration` (`H:MM`)
-- `Description`: must contain the Jira issue key, for example `CP-5098 - Notifikácia s aktualizáciami OpenAPI modelu`. The key becomes the issue, the text after ` - ` becomes the worklog comment.
+- `Description`: must contain the Jira issue key, for example `CP-5098 - Notifikácia s aktualizáciami OpenAPI modelu`. Only the key is used; worklogs are logged without a comment.
 
 ## Notes
 

@@ -43,7 +43,7 @@ popup.ts (UI + state)
 
 **`src/types.ts`** — TypeScript interfaces for Jira API responses and internal types.
 
-**`src/lib/worklogImport.ts`** — CSV parser (quoted fields, `;`/`,` auto-detect, BOM) and `parseImportCsv(text, source)` for the two import formats: standard (`date;issueKey;start;timeSpent;comment`, Jira-style durations like `7h 30m`) and Kimai (`Date`, `From`, `Duration` as `H:MM`, issue key extracted from `Description`). Throws on missing columns; row-level problems go to `ImportRow.errors`. Also holds `SAMPLE_CSV`.
+**`src/lib/worklogImport.ts`** — CSV parser (quoted fields, `;`/`,` auto-detect, BOM) and `parseImportCsv(text, source)` for the two import formats: standard (`date;issueKey;start;timeSpent;comment`, Jira-style durations like `7h 30m`) and Kimai (`Date`, `From`, `Duration` as `H:MM`, issue key extracted from `Description`, comment left empty). Throws on missing columns; row-level problems go to `ImportRow.errors`. Also holds `SAMPLE_CSV`.
 
 **`src/lib/settings.ts`** / **`src/lib/html.ts`** — shared storage keys, `sanitizeBaseUrl`, `escapeHtml`.
 
