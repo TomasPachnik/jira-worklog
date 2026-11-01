@@ -83,3 +83,34 @@ export interface JiraUserOption {
   value: string;
   label: string;
 }
+
+export type ImportSource = 'csv' | 'kimai';
+
+export interface ImportRow {
+  rowNumber: number;
+  date: string;
+  startTime: string;
+  started?: Date;
+  timeSpentSeconds: number;
+  issueKey: string;
+  comment: string;
+  errors: string[];
+}
+
+export interface PendingImport {
+  source: ImportSource;
+  fileName: string;
+  baseUrl: string;
+  text: string;
+}
+
+export interface NewWorklog {
+  started: Date;
+  timeSpentSeconds: number;
+  comment: string;
+}
+
+export interface IssueWithMyWorklogs {
+  summary: string;
+  worklogs: JiraWorklog[];
+}

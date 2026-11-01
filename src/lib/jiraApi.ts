@@ -1,5 +1,6 @@
-import { toLocalDateString } from './dateUtils';
+import { formatJiraDateTime, toLocalDateString } from './dateUtils';
 import type {
+  IssueWithMyWorklogs,
   JiraIssue,
   JiraIssueSearchResponse,
   JiraUser,
@@ -9,6 +10,7 @@ import type {
   JiraWorklogResponse,
   MonthRange,
   MonthlyWorklogResult,
+  NewWorklog,
   WorklogRow,
 } from '../types';
 
@@ -47,12 +49,12 @@ function makeJql(range: MonthRange, authors?: string[]): string {
 
 async function jiraFetch<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+    ...init,
     credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {
@@ -400,4 +402,53 @@ export async function fetchMonthlyWorklogs(
     totalSeconds,
     issuesScanned: issues.length,
   };
+}
+
+export async function fetchIssuesWithMyWorklogs(
+  baseUrl: string,
+  issueKeys: string[],
+): Promise<Map<string, IssueWithMyWorklogs | null>> {
+  const apiVersion = await detectApiVersion(baseUrl);
+  const user = await getCurrentUser(baseUrl, apiVersion);
+
+  const entries = await mapWithConcurrency(issueKeys, WORKLOG_CONCURRENCY, async (issueKey) => {
+    const issue = await tryJiraFetch<JiraIssue>(
+      baseUrl,
+      `/rest/api/${apiVersion}/issue/${encodeURIComponent(issueKey)}?fields=summary`,
+    );
+    if (!issue) {
+      return [issueKey, null] as const;
+    }
+
+    const worklogs = await getIssueWorklogs(baseUrl, apiVersion, issueKey);
+    const mine = worklogs.filter((worklog) => userMatchesAuthor(user, worklog.author));
+    return [issueKey, { summary: issue.fields.summary, worklogs: mine }] as const;
+  });
+
+  return new Map(entries);
+}
+
+export async function addWorklog(baseUrl: string, issueKey: string, worklog: NewWorklog): Promise<JiraWorklog> {
+  const apiVersion = await detectApiVersion(baseUrl);
+  const payload: Record<string, unknown> = {
+    started: formatJiraDateTime(worklog.started),
+    timeSpentSeconds: worklog.timeSpentSeconds,
+  };
+
+  if (worklog.comment) {
+    // v3 (Cloud) requires comments in Atlassian Document Format
+    payload.comment =
+      apiVersion === 3
+        ? { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: worklog.comment }] }] }
+        : worklog.comment;
+  }
+
+  return jiraFetch<JiraWorklog>(baseUrl, `/rest/api/${apiVersion}/issue/${encodeURIComponent(issueKey)}/worklog`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Atlassian-Token': 'no-check',
+    },
+    body: JSON.stringify(payload),
+  });
 }

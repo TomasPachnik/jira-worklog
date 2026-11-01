@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Import worklogs</title>
+  </head>
+  <body>
+    <main class="dialog">
+      <header class="dialogHeader">
+        <h1 id="title">Import worklogs</h1>
+        <div id="summary" class="summary"></div>
+      </header>
+
+      <section id="banner" class="banner hidden"></section>
+
+      <section class="tableWrap">
+        <table id="previewTable" class="hidden">
+          <thead>
+            <tr>
+              <th class="num">Row</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Time</th>
+              <th>Issue</th>
+              <th>Jira summary</th>
+              <th>Comment</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </section>
+
+      <footer class="dialogFooter">
+        <div class="legend">
+          <span class="swatch error"></span> Error – fix the CSV and import again
+          <span class="swatch duplicate"></span> Already in Jira – skipped
+        </div>
+        <span class="spacer"></span>
+        <button id="cancelBtn" type="button">Cancel</button>
+        <button id="confirmBtn" type="button" class="primary" disabled>Log worklogs</button>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/import/import.ts"></script>
+  </body>
+</html>

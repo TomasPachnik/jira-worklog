@@ -1,0 +1,238 @@
+:root {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: #172b4d;
+  background: #f7f8fa;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f4f5f7;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button.primary {
+  background: #0052cc;
+  border-color: #0052cc;
+  color: white;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #0747a6;
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+}
+
+.dialogHeader h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.chip {
+  background: white;
+  border: 1px solid #dfe1e6;
+  border-radius: 12px;
+  padding: 3px 10px;
+}
+
+.chip.error {
+  background: #ffebe6;
+  border-color: #ff8f73;
+  color: #bf2600;
+}
+
+.chip.duplicate {
+  background: #deebff;
+  border-color: #4c9aff;
+  color: #0747a6;
+}
+
+.banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.banner.loading,
+.banner.info {
+  background: #deebff;
+  color: #0747a6;
+}
+
+.banner.error {
+  background: #ffebe6;
+  color: #bf2600;
+}
+
+.banner.success {
+  background: #e3fcef;
+  color: #006644;
+}
+
+.tableWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #dfe1e6;
+  border-radius: 8px;
+  background: white;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #ebecf0;
+  text-align: left;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f5f7;
+}
+
+td.num,
+th.num {
+  color: #5e6c84;
+  text-align: right;
+  width: 1%;
+}
+
+td.nowrap {
+  white-space: nowrap;
+}
+
+tr.dayRow td {
+  background: #f4f5f7;
+  font-weight: 600;
+  border-top: 1px solid #dfe1e6;
+}
+
+.dayTotal {
+  float: right;
+  font-weight: normal;
+  color: #5e6c84;
+}
+
+tr.row-error td,
+tr.row-failed td {
+  background: #ffebe6;
+}
+
+tr.row-error td:first-child,
+tr.row-failed td:first-child {
+  box-shadow: inset 3px 0 #de350b;
+}
+
+tr.row-duplicate td {
+  background: #deebff;
+  color: #42526e;
+}
+
+tr.row-duplicate td:first-child {
+  box-shadow: inset 3px 0 #0052cc;
+}
+
+tr.row-logging td {
+  font-weight: 600;
+}
+
+tr.row-logged td {
+  background: #e3fcef;
+}
+
+td a {
+  color: #0052cc;
+}
+
+.statusText {
+  font-size: 12px;
+}
+
+tr.row-error .statusText,
+tr.row-failed .statusText {
+  color: #bf2600;
+}
+
+tr.row-duplicate .statusText {
+  color: #0747a6;
+}
+
+.dialogFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #5e6c84;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-left: 8px;
+}
+
+.swatch.error {
+  background: #ffebe6;
+  border: 1px solid #de350b;
+}
+
+.swatch.duplicate {
+  background: #deebff;
+  border: 1px solid #0052cc;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.hidden {
+  display: none;
+}

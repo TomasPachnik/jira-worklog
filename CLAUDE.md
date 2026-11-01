@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chrome extension (Manifest V3) that fetches and displays Jira worklogs of one or more users for a selected month, with a detailed CSV export and a per-issue summary CSV export. Supports both Jira Cloud (REST API v3) and Jira Server/Data Center (REST API v2).
+Chrome extension (Manifest V3) that fetches and displays Jira worklogs of one or more users for a selected month, with a detailed CSV export and a per-issue summary CSV export. Also bulk-logs worklogs from a standard CSV or a Kimai CSV export. Supports both Jira Cloud (REST API v3) and Jira Server/Data Center (REST API v2).
 
 ## Commands
 
@@ -18,8 +18,9 @@ There are no tests. To load the extension: enable Developer mode in `chrome://ex
 
 ## Architecture
 
-Two entry points bundled by Vite:
+Three entry points bundled by Vite:
 - `popup.html` + `src/popup/popup.ts` — the extension popup UI
+- `import.html` + `src/import/import.ts` — import preview/confirmation window
 - `src/background.ts` — service worker (minimal)
 
 ### Data flow
@@ -41,6 +42,24 @@ popup.ts (UI + state)
 - `buildSummaryCsv`: aggregated per issue + author, sorted by issue key then solver, columns `Project`, `Task ID`, `Task Name`, `Solver`, `Resolution` (`Y` only if resolution name is `Done`), `Spent (Hrs)`, `Jira ticket URL`.
 
 **`src/types.ts`** — TypeScript interfaces for Jira API responses and internal types.
+
+**`src/lib/worklogImport.ts`** — CSV parser (quoted fields, `;`/`,` auto-detect, BOM) and `parseImportCsv(text, source)` for the two import formats: standard (`date;issueKey;start;timeSpent;comment`, Jira-style durations like `7h 30m`) and Kimai (`Date`, `From`, `Duration` as `H:MM`, issue key extracted from `Description`). Throws on missing columns; row-level problems go to `ImportRow.errors`. Also holds `SAMPLE_CSV`.
+
+**`src/lib/settings.ts`** / **`src/lib/html.ts`** — shared storage keys, `sanitizeBaseUrl`, `escapeHtml`.
+
+### Import flow
+
+```
+popup.ts: Import button → hidden file input → parseImportCsv (fail fast on wrong file)
+  → chrome.storage.session[pendingImport] = { source, fileName, baseUrl, text }
+  → chrome.windows.create(import.html, type 'popup', centered over the current window)
+import.ts: reads + removes pendingImport → parseImportCsv again
+  → fetchIssuesWithMyWorklogs (issue exists? my existing worklogs)
+  → classify rows: error (red, blocks logging) | duplicate (blue, skipped) | ready
+  → on confirm: addWorklog sequentially, per-row result
+```
+
+Import runs in a separate window because the extension popup closes on blur; the popup only picks and parses the file. Duplicate = same issue, same `started` instant and same `timeSpentSeconds` (also within the file). No delete/undo: users may lack permission to delete worklogs.
 
 ### Authentication
 

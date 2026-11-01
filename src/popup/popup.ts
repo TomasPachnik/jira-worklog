@@ -1,16 +1,15 @@
 import { buildCsv, buildSummaryCsv, downloadCsv } from '../lib/csv';
-import { getMonthOptions, getMonthRange } from '../lib/dateUtils';
+import { formatDuration, getMonthOptions, getMonthRange } from '../lib/dateUtils';
+import { escapeHtml } from '../lib/html';
 import { fetchMonthlyWorklogs, searchJiraUsers } from '../lib/jiraApi';
-import type { WorklogRow } from '../types';
+import { PENDING_IMPORT_KEY, STORAGE_KEYS, sanitizeBaseUrl } from '../lib/settings';
+import { SAMPLE_CSV, parseImportCsv } from '../lib/worklogImport';
+import type { ImportSource, PendingImport, WorklogRow } from '../types';
 import './popup.css';
 
-const STORAGE_KEYS = {
-  baseUrl: 'jiraBaseUrl',
-  users: 'jiraWorklogUsers',
-  monthOffset: 'monthOffset',
-} as const;
-
 const MAX_MONTH_OFFSET = 3;
+const IMPORT_WINDOW_WIDTH = 1200;
+const IMPORT_WINDOW_HEIGHT = 850;
 
 function getRequiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -34,11 +33,16 @@ const worklogTable = getRequiredElement<HTMLTableElement>('#worklogTable');
 const worklogTableBody = getRequiredElement<HTMLTableSectionElement>('#worklogTableBody');
 const exportBtn = getRequiredElement<HTMLButtonElement>('#exportBtn');
 const exportSummaryBtn = getRequiredElement<HTMLButtonElement>('#exportSummaryBtn');
+const importCsvBtn = getRequiredElement<HTMLButtonElement>('#importCsvBtn');
+const importKimaiBtn = getRequiredElement<HTMLButtonElement>('#importKimaiBtn');
+const importFileInput = getRequiredElement<HTMLInputElement>('#importFileInput');
+const sampleCsvLink = getRequiredElement<HTMLAnchorElement>('#sampleCsvLink');
 
 let currentRows: WorklogRow[] = [];
 let currentTotalSeconds = 0;
 let currentBaseUrl = '';
 let userSearchTimer: number | undefined;
+let importSource: ImportSource = 'csv';
 
 function parseUsersInput(value: string): string[] {
   return value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -53,25 +57,6 @@ function getLastToken(value: string): { token: string; before: string } {
     token: value.slice(lastComma + 1).trim(),
     before: value.slice(0, lastComma + 1) + ' ',
   };
-}
-
-function formatDuration(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
-}
-
-function sanitizeBaseUrl(value: string): string {
-  const raw = value.trim();
-  if (!raw) {
-    return '';
-  }
-
-  try {
-    return new URL(raw).origin;
-  } catch {
-    return raw.replace(/\/$/, '');
-  }
 }
 
 function setStatus(message: string, mode: 'loading' | 'error' | 'empty' | 'hidden'): void {
@@ -114,15 +99,6 @@ function renderTable(rows: WorklogRow[]): void {
     .join('');
 
   worklogTable.classList.remove('hidden');
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 async function getActiveTabJiraBaseUrl(): Promise<string | null> {
@@ -250,6 +226,60 @@ async function loadAndRender(): Promise<void> {
   }
 }
 
+function startImport(source: ImportSource): void {
+  if (!sanitizeBaseUrl(baseUrlInput.value)) {
+    setStatus('Set Jira Base URL first, then import.', 'error');
+    return;
+  }
+
+  importSource = source;
+  importFileInput.value = '';
+  importFileInput.click();
+}
+
+async function openImportWindow(): Promise<void> {
+  const current = await chrome.windows.getCurrent();
+  const width = Math.min(IMPORT_WINDOW_WIDTH, current.width ?? IMPORT_WINDOW_WIDTH);
+  const height = Math.min(IMPORT_WINDOW_HEIGHT, current.height ?? IMPORT_WINDOW_HEIGHT);
+  const left = Math.round((current.left ?? 0) + ((current.width ?? width) - width) / 2);
+  const top = Math.round((current.top ?? 0) + ((current.height ?? height) - height) / 2);
+
+  await chrome.windows.create({
+    url: chrome.runtime.getURL('import.html'),
+    type: 'popup',
+    width,
+    height,
+    left,
+    top,
+  });
+}
+
+async function handleImportFile(): Promise<void> {
+  const file = importFileInput.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    // Fail fast on a wrong file (missing columns, empty); row-level errors are shown in the import window
+    parseImportCsv(text, importSource);
+
+    await saveSettings();
+    const pending: PendingImport = {
+      source: importSource,
+      fileName: file.name,
+      baseUrl: sanitizeBaseUrl(baseUrlInput.value),
+      text,
+    };
+    await chrome.storage.session.set({ [PENDING_IMPORT_KEY]: pending });
+    await openImportWindow();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus(`Cannot import ${file.name}: ${message}`, 'error');
+  }
+}
+
 function initMonthSelect(): void {
   monthOffsetSelect.innerHTML = getMonthOptions(MAX_MONTH_OFFSET)
     .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
@@ -334,6 +364,17 @@ async function init(): Promise<void> {
     const offsetValue = Number(monthOffsetSelect.value);
     const csv = buildSummaryCsv(currentRows, currentBaseUrl);
     downloadCsv(buildSummaryExportFileName(offsetValue), csv);
+  });
+
+  importCsvBtn.addEventListener('click', () => startImport('csv'));
+  importKimaiBtn.addEventListener('click', () => startImport('kimai'));
+  importFileInput.addEventListener('change', () => {
+    void handleImportFile();
+  });
+
+  sampleCsvLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadCsv('jira-worklog-import-sample.csv', `﻿${SAMPLE_CSV}`);
   });
 
   await loadAndRender();

@@ -1,6 +1,6 @@
 # Jira Monthly Worklog Chrome Extension
 
-Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of one or more users for a selected month, shows totals, and exports a detailed CSV and a per-issue summary CSV.
+Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of one or more users for a selected month, shows totals, and exports a detailed CSV and a per-issue summary CSV. It can also bulk-log worklogs to Jira from a CSV file or a Kimai export.
 
 ## Features
 
@@ -25,7 +25,8 @@ Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of 
   - Table with date, user, issue key, summary, logged time, project
 - CSV export (`Export CSV`): one row per worklog
 - Summary CSV export (`Export Summary CSV`): one row per issue and user
-- Both CSV files:
+- Bulk worklog import (`Import from CSV`, `Import from Kimai`) with a preview window before anything is logged
+- Both CSV export files:
   - `;` separator
   - UTF-8 BOM for correct diacritics in Excel
   - Hours use a decimal comma (for example `1,50`)
@@ -44,9 +45,15 @@ Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of 
 - `src/background.ts`
 - `src/popup/popup.ts`
 - `src/popup/popup.css`
+- `import.html`
+- `src/import/import.ts`
+- `src/import/import.css`
 - `src/lib/jiraApi.ts`
 - `src/lib/dateUtils.ts`
 - `src/lib/csv.ts`
+- `src/lib/worklogImport.ts`
+- `src/lib/settings.ts`
+- `src/lib/html.ts`
 - `src/types.ts`
 
 ## Install
@@ -120,6 +127,46 @@ Columns:
 - `Spent (Hrs)`: hours logged by the user on the issue in the selected month
 - `Jira ticket URL`: `<base URL>/browse/<issue key>`
 
+## Worklog import
+
+Logs your own worklogs to Jira in bulk, for example once a month.
+
+1. Set the Jira Base URL in the popup.
+2. Click `Import from CSV` or `Import from Kimai` and pick a `.csv` file.
+3. A separate window opens, checks every row against Jira and shows a preview grouped by day with daily totals:
+   - red row: error (invalid date/time/duration, missing issue key, issue not found in Jira). Logging is blocked; fix the CSV and import it again.
+   - blue row: the same worklog (issue, start and duration) already exists in Jira, or appears earlier in the file. It will be skipped.
+   - other rows will be logged.
+4. Click `Log N worklogs` to log them one by one, or `Cancel`. Each row then shows `✓ Logged` or the error returned by Jira.
+
+Imported worklogs cannot be undone from the extension.
+
+### Standard import CSV
+
+Download a sample via `Download sample CSV` in the popup.
+
+```csv
+date;issueKey;start;timeSpent;comment
+2026-10-01;CP-4983;08:00;8h;DT2 - Care
+2026-10-20;CP-5061;08:00;4h;
+2026-10-20;CP-4983;12:00;3h 30m;Code review
+```
+
+- Header row is required; column order does not matter, names are case-insensitive.
+- `;` separator (`,` is also detected), UTF-8 with or without BOM.
+- `date` (required): `YYYY-MM-DD`
+- `issueKey` (required): for example `CP-4983`
+- `start` (optional): `HH:MM`, defaults to `09:00`
+- `timeSpent` (required): Jira format, for example `8h`, `7h 30m`, `45m`. Days and weeks (`d`, `w`) are not supported.
+- `comment` (optional): worklog comment
+
+### Kimai import
+
+Use the CSV export from Kimai as is. Used columns:
+
+- `Date` (`YYYY-MM-DD`), `From` (`HH:MM`), `Duration` (`H:MM`)
+- `Description`: must contain the Jira issue key, for example `CP-5098 - Notifikácia s aktualizáciami OpenAPI modelu`. The key becomes the issue, the text after ` - ` becomes the worklog comment.
+
 ## Notes
 
 - Extension uses browser session (`credentials: include`), so user must already be logged into Jira in the same Chrome profile.
@@ -127,7 +174,7 @@ Columns:
 - Date filtering is done in two layers:
   - broad JQL by `worklogAuthor` and `worklogDate`
   - exact in-code filtering by worklog author and timestamp
-- Month boundaries and worklog dates use the browser's local time zone.
+- Month boundaries, worklog dates and imported start times use the browser's local time zone.
 - Host permissions are set to `https://*/*` to support custom Jira domains.
 
 ## Known limitations

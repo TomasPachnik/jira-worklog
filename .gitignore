@@ -7,6 +7,9 @@ dist
 *.crx
 *.pem
 
+# Local data (Kimai exports, import files)
+*.csv
+
 # IDE
 .idea/
 .vscode/

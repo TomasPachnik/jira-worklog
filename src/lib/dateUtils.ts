@@ -31,6 +31,21 @@ export function toLocalDateString(dateInput: string | Date): string {
   return formatIsoLocalDate(date);
 }
 
+export function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}
+
+// Jira expects "yyyy-MM-dd'T'HH:mm:ss.SSSZ", e.g. 2026-10-01T08:00:00.000+0200
+export function formatJiraDateTime(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absOffset = Math.abs(offsetMinutes);
+  const offset = `${sign}${pad2(Math.floor(absOffset / 60))}${pad2(absOffset % 60)}`;
+  return `${formatIsoLocalDate(date)}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}.000${offset}`;
+}
+
 export function getMonthOptions(maxOffset: number): Array<{ value: string; label: string }> {
   const now = new Date();
   const options: Array<{ value: string; label: string }> = [];
