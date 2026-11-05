@@ -1,6 +1,6 @@
 # Jira Monthly Worklog Chrome Extension
 
-Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of one or more users for a selected month, shows totals, and exports a detailed CSV and a per-issue summary CSV. It can also bulk-log worklogs to Jira from a CSV file or a Kimai export.
+Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of one or more users for a selected month, shows totals, and exports a detailed CSV and a per-issue summary CSV. It can also bulk-log worklogs to Jira from a CSV file, a Kimai export or a Toggl Track export.
 
 ## Features
 
@@ -25,7 +25,7 @@ Minimal Chrome Extension (Manifest V3 + TypeScript) that loads Jira worklogs of 
   - Table with date, user, issue key, summary, logged time, project
 - CSV export (`Export CSV`): one row per worklog
 - Summary CSV export (`Export Summary CSV`): one row per issue and user
-- Bulk worklog import (`Import from CSV`, `Import from Kimai`) with a preview window before anything is logged
+- Bulk worklog import (`Import from CSV`, `Import from Kimai`, `Import from Toggl`) with a preview window before anything is logged
 - Both CSV export files:
   - `;` separator
   - UTF-8 BOM for correct diacritics in Excel
@@ -132,7 +132,7 @@ Columns:
 Logs your own worklogs to Jira in bulk, for example once a month.
 
 1. Set the Jira Base URL in the popup.
-2. Click `Import from CSV` or `Import from Kimai` and pick a `.csv` file.
+2. Click `Import from CSV`, `Import from Kimai` or `Import from Toggl` and pick a `.csv` file.
 3. A separate window opens, checks every row against Jira and shows a preview grouped by day with daily totals:
    - red row: error (invalid date/time/duration, missing issue key, issue not found in Jira). Logging is blocked; fix the CSV and import it again.
    - blue row: the same worklog (issue, start and duration) already exists in Jira, or appears earlier in the file. It will be skipped.
@@ -166,6 +166,26 @@ Use the CSV export from Kimai as is. Used columns:
 
 - `Date` (`YYYY-MM-DD`), `From` (`HH:MM`), `Duration` (`H:MM`)
 - `Description`: must contain the Jira issue key, for example `CP-5098 - Notifikácia s aktualizáciami OpenAPI modelu`. Only the key is used; worklogs are logged without a comment.
+
+### Toggl import
+
+Use the Toggl Track detailed report CSV export as is. Used columns:
+
+- `Start date` (`YYYY-MM-DD`), `Start time` (`HH:MM:SS`), `Duration` (`H:MM:SS`)
+- `Description` decides the issue and the worklog comment:
+
+| Description | Logged to | Comment |
+| --- | --- | --- |
+| `CP-5061 - codereview`, `CP-5061 CR`, `CP-5061 code-review` | `CP-5061` | `codereview` |
+| `CP-5100` (issue type Bug) | `CP-5100` | `bugfixing` |
+| `CP-5100` (any other issue type: Task, Feature, Story, …) | `CP-5100` | `development` |
+| `STANDUP` | administration issue of the worklog's year | `standup` |
+| `STATUS` | administration issue of the worklog's year | `status` |
+| `PRODUKCIA` | administration issue of the worklog's year | `produkcia` |
+
+Any other description without an issue key is an error.
+
+The administration task changes every year. Set it in the popup footer in `Administration task <year>:` (default `Administration task 2026: CP-4405`). The popup shows a field for the current year, plus the previous year while it is filled in, so in January 2027 you see both `Administration task 2026:` and an empty `Administration task 2027:` to fill in. The year is taken from the worklog date, so December entries imported in January still go to the previous year's task.
 
 ## Notes
 

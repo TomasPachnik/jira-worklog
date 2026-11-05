@@ -59,11 +59,13 @@
           <span class="spacer"></span>
           <button id="importCsvBtn" type="button">Import from CSV</button>
           <button id="importKimaiBtn" type="button">Import from Kimai</button>
+          <button id="importTogglBtn" type="button">Import from Toggl</button>
         </div>
         <div class="importHint">
           CSV format: <code>date;issueKey;start;timeSpent;comment</code> ·
           <a id="sampleCsvLink" href="#">Download sample CSV</a>
         </div>
+        <div id="administrationIssues" class="importSetting"></div>
         <input id="importFileInput" type="file" accept=".csv,text/csv" class="hidden" />
       </footer>
     </main>

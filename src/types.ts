@@ -26,6 +26,7 @@ export interface JiraIssue {
     summary: string;
     project?: JiraProject;
     resolution?: { name?: string };
+    issuetype?: { name?: string };
   };
 }
 
@@ -84,7 +85,10 @@ export interface JiraUserOption {
   label: string;
 }
 
-export type ImportSource = 'csv' | 'kimai';
+export type ImportSource = 'csv' | 'kimai' | 'toggl';
+
+// Year ("2026") -> Jira issue key that STANDUP/STATUS/PRODUKCIA entries from Toggl are logged to
+export type AdministrationIssues = Record<string, string>;
 
 export interface ImportRow {
   rowNumber: number;
@@ -94,6 +98,8 @@ export interface ImportRow {
   timeSpentSeconds: number;
   issueKey: string;
   comment: string;
+  // Toggl: the comment depends on the Jira issue type, so it is filled in once the issue is loaded
+  commentFromIssueType?: boolean;
   errors: string[];
 }
 
@@ -102,6 +108,7 @@ export interface PendingImport {
   fileName: string;
   baseUrl: string;
   text: string;
+  administrationIssues: AdministrationIssues;
 }
 
 export interface NewWorklog {
@@ -112,5 +119,6 @@ export interface NewWorklog {
 
 export interface IssueWithMyWorklogs {
   summary: string;
+  issueType?: string;
   worklogs: JiraWorklog[];
 }

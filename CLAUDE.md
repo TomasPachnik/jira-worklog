@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chrome extension (Manifest V3) that fetches and displays Jira worklogs of one or more users for a selected month, with a detailed CSV export and a per-issue summary CSV export. Also bulk-logs worklogs from a standard CSV or a Kimai CSV export. Supports both Jira Cloud (REST API v3) and Jira Server/Data Center (REST API v2).
+Chrome extension (Manifest V3) that fetches and displays Jira worklogs of one or more users for a selected month, with a detailed CSV export and a per-issue summary CSV export. Also bulk-logs worklogs from a standard CSV, a Kimai CSV export or a Toggl Track CSV export. Supports both Jira Cloud (REST API v3) and Jira Server/Data Center (REST API v2).
 
 ## Commands
 
@@ -43,18 +43,18 @@ popup.ts (UI + state)
 
 **`src/types.ts`** — TypeScript interfaces for Jira API responses and internal types.
 
-**`src/lib/worklogImport.ts`** — CSV parser (quoted fields, `;`/`,` auto-detect, BOM) and `parseImportCsv(text, source)` for the two import formats: standard (`date;issueKey;start;timeSpent;comment`, Jira-style durations like `7h 30m`) and Kimai (`Date`, `From`, `Duration` as `H:MM`, issue key extracted from `Description`, comment left empty). Throws on missing columns; row-level problems go to `ImportRow.errors`. Also holds `SAMPLE_CSV`.
+**`src/lib/worklogImport.ts`** — CSV parser (quoted fields, `;`/`,` auto-detect, BOM) and `parseImportCsv(text, source, administrationIssues)` for the three import formats: standard (`date;issueKey;start;timeSpent;comment`, Jira-style durations like `7h 30m`), Kimai (`Date`, `From`, `Duration` as `H:MM`, issue key extracted from `Description`, comment left empty) and Toggl (`Start date`, `Start time`, `Duration` as `H:MM:SS`, `Description`). Toggl rules: issue key in description → that issue, comment `codereview` if the rest of the description contains `CR`/`code-review`/`codereview`, otherwise `ImportRow.commentFromIssueType` is set and `import.ts` fills the comment from the Jira issue type via `commentForIssueType` (`bugfixing` for Bug, `development` for anything else); `STANDUP`/`STATUS`/`PRODUKCIA` → yearly administration issue (by worklog year), comment `standup`/`status`/`produkcia`. Throws on missing columns; row-level problems go to `ImportRow.errors`. Also holds `SAMPLE_CSV`.
 
-**`src/lib/settings.ts`** / **`src/lib/html.ts`** — shared storage keys, `sanitizeBaseUrl`, `escapeHtml`.
+**`src/lib/settings.ts`** / **`src/lib/html.ts`** — shared storage keys, `sanitizeBaseUrl`, `escapeHtml`, and the year → administration task mapping (`DEFAULT_ADMINISTRATION_ISSUES` = `{ 2026: CP-4405 }`). The popup footer renders an `Administration task <year>:` field per year from `getAdministrationYears` (current year + configured years not older than the previous year); the mapping is stored in `chrome.storage.local` and passed to the import window in `PendingImport.administrationIssues`.
 
 ### Import flow
 
 ```
 popup.ts: Import button → hidden file input → parseImportCsv (fail fast on wrong file)
-  → chrome.storage.session[pendingImport] = { source, fileName, baseUrl, text }
+  → chrome.storage.session[pendingImport] = { source, fileName, baseUrl, text, administrationIssues }
   → chrome.windows.create(import.html, type 'popup', centered over the current window)
 import.ts: reads + removes pendingImport → parseImportCsv again
-  → fetchIssuesWithMyWorklogs (issue exists? my existing worklogs)
+  → fetchIssuesWithMyWorklogs (issue exists? issue type, my existing worklogs)
   → classify rows: error (red, blocks logging) | duplicate (blue, skipped) | ready
   → on confirm: addWorklog sequentially, per-row result
 ```
