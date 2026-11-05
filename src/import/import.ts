@@ -2,8 +2,8 @@ import { formatDuration } from '../lib/dateUtils';
 import { escapeHtml } from '../lib/html';
 import { addWorklog, fetchIssuesWithMyWorklogs, normalizeBaseUrl } from '../lib/jiraApi';
 import { PENDING_IMPORT_KEY } from '../lib/settings';
-import { isValidIssueKey, parseImportCsv } from '../lib/worklogImport';
-import type { ImportRow, IssueWithMyWorklogs, PendingImport } from '../types';
+import { commentForIssueType, isValidIssueKey, parseImportCsv } from '../lib/worklogImport';
+import type { ImportRow, ImportSource, IssueWithMyWorklogs, PendingImport } from '../types';
 import './import.css';
 
 type RowStatus = 'error' | 'duplicate' | 'ready' | 'logging' | 'logged' | 'failed';
@@ -17,6 +17,7 @@ interface RowState {
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SOURCE_LABELS: Record<ImportSource, string> = { csv: 'CSV', kimai: 'Kimai', toggl: 'Toggl' };
 
 function getRequiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -191,9 +192,13 @@ function renderFooter(): void {
 function classifyRows(rows: ImportRow[], issues: Map<string, IssueWithMyWorklogs | null>): RowState[] {
   const seenInFile = new Set<string>();
 
-  return rows.map((row) => {
-    const errors = [...row.errors];
-    const issue = isValidIssueKey(row.issueKey) ? issues.get(row.issueKey) : undefined;
+  return rows.map((parsedRow) => {
+    const errors = [...parsedRow.errors];
+    const issue = isValidIssueKey(parsedRow.issueKey) ? issues.get(parsedRow.issueKey) : undefined;
+    const row: ImportRow =
+      parsedRow.commentFromIssueType && issue
+        ? { ...parsedRow, comment: commentForIssueType(issue.issueType) }
+        : parsedRow;
     if (issue === null) {
       errors.push('Issue not found in Jira (or you have no access to it)');
     }
@@ -281,13 +286,13 @@ async function init(): Promise<void> {
   await chrome.storage.session.remove(PENDING_IMPORT_KEY);
 
   baseUrl = normalizeBaseUrl(pending.baseUrl);
-  const sourceLabel = pending.source === 'kimai' ? 'Kimai' : 'CSV';
+  const sourceLabel = SOURCE_LABELS[pending.source];
   title.textContent = `Import from ${sourceLabel}: ${pending.fileName}`;
   document.title = `Import from ${sourceLabel}`;
   setBanner(`Checking issues and existing worklogs in ${baseUrl}…`, 'loading');
 
   try {
-    const rows = parseImportCsv(pending.text, pending.source);
+    const rows = parseImportCsv(pending.text, pending.source, pending.administrationIssues);
     const issueKeys = [...new Set(rows.map((r) => r.issueKey).filter(isValidIssueKey))];
     const issues = await fetchIssuesWithMyWorklogs(baseUrl, issueKeys);
     states = classifyRows(rows, issues);

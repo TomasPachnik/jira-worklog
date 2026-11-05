@@ -2,9 +2,16 @@ import { buildCsv, buildSummaryCsv, downloadCsv } from '../lib/csv';
 import { formatDuration, getMonthOptions, getMonthRange } from '../lib/dateUtils';
 import { escapeHtml } from '../lib/html';
 import { fetchMonthlyWorklogs, searchJiraUsers } from '../lib/jiraApi';
-import { PENDING_IMPORT_KEY, STORAGE_KEYS, sanitizeBaseUrl } from '../lib/settings';
+import {
+  DEFAULT_ADMINISTRATION_ISSUES,
+  PENDING_IMPORT_KEY,
+  STORAGE_KEYS,
+  getAdministrationYears,
+  isAdministrationIssueKey,
+  sanitizeBaseUrl,
+} from '../lib/settings';
 import { SAMPLE_CSV, parseImportCsv } from '../lib/worklogImport';
-import type { ImportSource, PendingImport, WorklogRow } from '../types';
+import type { AdministrationIssues, ImportSource, PendingImport, WorklogRow } from '../types';
 import './popup.css';
 
 const MAX_MONTH_OFFSET = 3;
@@ -35,6 +42,8 @@ const exportBtn = getRequiredElement<HTMLButtonElement>('#exportBtn');
 const exportSummaryBtn = getRequiredElement<HTMLButtonElement>('#exportSummaryBtn');
 const importCsvBtn = getRequiredElement<HTMLButtonElement>('#importCsvBtn');
 const importKimaiBtn = getRequiredElement<HTMLButtonElement>('#importKimaiBtn');
+const importTogglBtn = getRequiredElement<HTMLButtonElement>('#importTogglBtn');
+const administrationIssuesContainer = getRequiredElement<HTMLElement>('#administrationIssues');
 const importFileInput = getRequiredElement<HTMLInputElement>('#importFileInput');
 const sampleCsvLink = getRequiredElement<HTMLAnchorElement>('#sampleCsvLink');
 
@@ -43,6 +52,7 @@ let currentTotalSeconds = 0;
 let currentBaseUrl = '';
 let userSearchTimer: number | undefined;
 let importSource: ImportSource = 'csv';
+let administrationIssues: AdministrationIssues = {};
 
 function parseUsersInput(value: string): string[] {
   return value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -124,6 +134,60 @@ async function saveSettings(): Promise<void> {
     [STORAGE_KEYS.users]: parseUsersInput(userInput.value),
     [STORAGE_KEYS.monthOffset]: Number(monthOffsetSelect.value),
   });
+}
+
+function renderAdministrationInputs(): void {
+  const years = getAdministrationYears(administrationIssues, new Date().getFullYear());
+  administrationIssuesContainer.innerHTML = years
+    .map(
+      (year) => `
+      <label title="Toggl STANDUP / STATUS / PRODUKCIA entries from ${year} are logged to this task">
+        <span>Administration task ${year}:</span>
+        <input type="text" data-year="${year}" value="${escapeHtml(administrationIssues[year] ?? '')}" placeholder="e.g. CP-4405" />
+      </label>`,
+    )
+    .join('');
+}
+
+function getAdministrationInputs(): HTMLInputElement[] {
+  return Array.from(administrationIssuesContainer.querySelectorAll<HTMLInputElement>('input[data-year]'));
+}
+
+// Validates and normalizes one field; returns false when it does not hold a Jira issue key
+function applyAdministrationInput(input: HTMLInputElement): boolean {
+  const year = input.dataset.year ?? '';
+  const value = input.value.trim().toUpperCase();
+  const valid = !value || isAdministrationIssueKey(value);
+
+  input.classList.toggle('invalid', !valid);
+  input.title = valid ? '' : 'Expected a Jira issue key, e.g. CP-4405';
+  if (!valid) {
+    return false;
+  }
+
+  input.value = value;
+  if (value) {
+    administrationIssues[year] = value;
+  } else {
+    delete administrationIssues[year];
+  }
+  return true;
+}
+
+function readAdministrationIssues(): AdministrationIssues {
+  const invalidYears = getAdministrationInputs()
+    .filter((input) => !applyAdministrationInput(input))
+    .map((input) => input.dataset.year);
+  if (invalidYears.length > 0) {
+    throw new Error(`Administration task ${invalidYears.join(', ')} is not a Jira issue key (expected e.g. CP-4405)`);
+  }
+  return { ...administrationIssues };
+}
+
+async function saveAdministrationInput(input: HTMLInputElement): Promise<void> {
+  if (applyAdministrationInput(input)) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.administrationIssues]: administrationIssues });
+  }
 }
 
 function buildExportFileName(offset: number): string {
@@ -262,8 +326,9 @@ async function handleImportFile(): Promise<void> {
 
   try {
     const text = await file.text();
+    const administrationIssues = importSource === 'toggl' ? readAdministrationIssues() : {};
     // Fail fast on a wrong file (missing columns, empty); row-level errors are shown in the import window
-    parseImportCsv(text, importSource);
+    parseImportCsv(text, importSource, administrationIssues);
 
     await saveSettings();
     const pending: PendingImport = {
@@ -271,6 +336,7 @@ async function handleImportFile(): Promise<void> {
       fileName: file.name,
       baseUrl: sanitizeBaseUrl(baseUrlInput.value),
       text,
+      administrationIssues,
     };
     await chrome.storage.session.set({ [PENDING_IMPORT_KEY]: pending });
     await openImportWindow();
@@ -294,6 +360,7 @@ async function init(): Promise<void> {
     STORAGE_KEYS.users,
     'jiraWorklogUser', // legacy single-user key
     STORAGE_KEYS.monthOffset,
+    STORAGE_KEYS.administrationIssues,
   ]);
   const tabBaseUrl = await getActiveTabJiraBaseUrl();
 
@@ -309,6 +376,10 @@ async function init(): Promise<void> {
 
   const offset = Number(stored[STORAGE_KEYS.monthOffset]);
   monthOffsetSelect.value = Number.isFinite(offset) && offset >= 0 && offset <= MAX_MONTH_OFFSET ? String(offset) : '0';
+
+  const storedAdministrationIssues = stored[STORAGE_KEYS.administrationIssues] as AdministrationIssues | undefined;
+  administrationIssues = { ...(storedAdministrationIssues ?? DEFAULT_ADMINISTRATION_ISSUES) };
+  renderAdministrationInputs();
 
   refreshBtn.addEventListener('click', () => {
     void loadAndRender();
@@ -368,6 +439,12 @@ async function init(): Promise<void> {
 
   importCsvBtn.addEventListener('click', () => startImport('csv'));
   importKimaiBtn.addEventListener('click', () => startImport('kimai'));
+  importTogglBtn.addEventListener('click', () => startImport('toggl'));
+  administrationIssuesContainer.addEventListener('change', (event) => {
+    if (event.target instanceof HTMLInputElement) {
+      void saveAdministrationInput(event.target);
+    }
+  });
   importFileInput.addEventListener('change', () => {
     void handleImportFile();
   });

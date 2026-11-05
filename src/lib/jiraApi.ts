@@ -414,7 +414,7 @@ export async function fetchIssuesWithMyWorklogs(
   const entries = await mapWithConcurrency(issueKeys, WORKLOG_CONCURRENCY, async (issueKey) => {
     const issue = await tryJiraFetch<JiraIssue>(
       baseUrl,
-      `/rest/api/${apiVersion}/issue/${encodeURIComponent(issueKey)}?fields=summary`,
+      `/rest/api/${apiVersion}/issue/${encodeURIComponent(issueKey)}?fields=summary,issuetype`,
     );
     if (!issue) {
       return [issueKey, null] as const;
@@ -422,7 +422,7 @@ export async function fetchIssuesWithMyWorklogs(
 
     const worklogs = await getIssueWorklogs(baseUrl, apiVersion, issueKey);
     const mine = worklogs.filter((worklog) => userMatchesAuthor(user, worklog.author));
-    return [issueKey, { summary: issue.fields.summary, worklogs: mine }] as const;
+    return [issueKey, { summary: issue.fields.summary, issueType: issue.fields.issuetype?.name, worklogs: mine }] as const;
   });
 
   return new Map(entries);

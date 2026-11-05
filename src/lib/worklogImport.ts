@@ -1,4 +1,4 @@
-import type { ImportRow, ImportSource } from '../types';
+import type { AdministrationIssues, ImportRow, ImportSource } from '../types';
 
 const ISSUE_KEY_PATTERN = /\b[A-Z][A-Z0-9_]+-\d+\b/;
 const DEFAULT_START_TIME = '09:00';
@@ -32,6 +32,37 @@ const KIMAI_COLUMNS: ColumnSpec = {
   duration: 'Duration',
   description: 'Description',
 };
+
+const TOGGL_COLUMNS: ColumnSpec = {
+  date: 'Start date',
+  start: 'Start time',
+  duration: 'Duration',
+  description: 'Description',
+};
+
+const COLUMNS: Record<ImportSource, ColumnSpec> = {
+  csv: STANDARD_COLUMNS,
+  kimai: KIMAI_COLUMNS,
+  toggl: TOGGL_COLUMNS,
+};
+
+const DURATION_HINTS: Record<ImportSource, string> = {
+  csv: 'e.g. 8h, 7h 30m, 45m',
+  kimai: 'H:MM',
+  toggl: 'H:MM:SS',
+};
+
+// Toggl description suffix after the issue key, e.g. "CP-5061 - codereview", "CP-5061 CR"
+const CODE_REVIEW_PATTERN = /(?:^|[^\p{L}\p{N}])(?:cr|code[\s_-]?review)(?![\p{L}\p{N}])/iu;
+// Toggl entries without an issue key that go to the yearly administration issue
+const ADMINISTRATION_PATTERN = /^(stand[\s-]?up|status|produkcia)(?![\p{L}\p{N}])/iu;
+
+interface IssueTarget {
+  issueKey: string;
+  comment: string;
+  commentFromIssueType?: boolean;
+  error?: string;
+}
 
 export function isValidIssueKey(value: string): boolean {
   return ISSUE_KEY_PATTERN.test(value);
@@ -122,6 +153,41 @@ function parseTime(value: string): string | null {
   return `${pad2(hours)}:${pad2(minutes)}`;
 }
 
+// Worklog comment for a Toggl entry on a regular issue, by its Jira issue type
+export function commentForIssueType(issueType: string | undefined): string {
+  return /bug/i.test(issueType ?? '') ? 'bugfixing' : 'development';
+}
+
+function resolveTogglTarget(
+  description: string,
+  date: string | null,
+  administrationIssues: AdministrationIssues,
+): IssueTarget {
+  const issueKey = ISSUE_KEY_PATTERN.exec(description)?.[0];
+  if (issueKey) {
+    return CODE_REVIEW_PATTERN.test(description.replace(issueKey, ''))
+      ? { issueKey, comment: 'codereview' }
+      : { issueKey, comment: '', commentFromIssueType: true };
+  }
+
+  const activity = ADMINISTRATION_PATTERN.exec(description.trim())?.[1];
+  if (activity) {
+    // "Stand-up" / "stand up" -> "standup"; "STATUS" -> "status"; "PRODUKCIA" -> "produkcia"
+    const comment = activity.toLowerCase().replace(/[\s-]/g, '');
+    if (!date) {
+      // the invalid date is already reported
+      return { issueKey: '', comment };
+    }
+    const year = date.slice(0, 4);
+    const adminKey = administrationIssues[year];
+    return adminKey
+      ? { issueKey: adminKey, comment }
+      : { issueKey: '', comment, error: `No administration task set for ${year} – fill in "Administration task ${year}" in the extension popup` };
+  }
+
+  return { issueKey: '', comment: '', error: 'No Jira issue key, STANDUP, STATUS or PRODUKCIA in the description' };
+}
+
 // Jira format: "8h", "7h 30m", "45m"
 function parseJiraDuration(value: string): number | null {
   const match = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$/i.exec(value.trim());
@@ -131,7 +197,7 @@ function parseJiraDuration(value: string): number | null {
   return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60;
 }
 
-// Kimai format: "8:00", "7:30", "0:45:00"
+// Kimai / Toggl format: "8:00", "7:30", "0:45:00"
 function parseClockDuration(value: string): number | null {
   const match = /^(\d+):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
   if (!match) {
@@ -167,9 +233,12 @@ function resolveColumns(header: string[], spec: ColumnSpec): Record<keyof Column
   return columns;
 }
 
-export function parseImportCsv(text: string, source: ImportSource): ImportRow[] {
-  const isKimai = source === 'kimai';
-  const spec = isKimai ? KIMAI_COLUMNS : STANDARD_COLUMNS;
+export function parseImportCsv(
+  text: string,
+  source: ImportSource,
+  administrationIssues: AdministrationIssues = {},
+): ImportRow[] {
+  const spec = COLUMNS[source];
   const [header, ...records] = parseCsv(text);
   if (!header) {
     throw new Error('The file is empty.');
@@ -199,25 +268,35 @@ export function parseImportCsv(text: string, source: ImportSource): ImportRow[] 
     }
 
     const rawDuration = cell(record, columns.duration);
-    const timeSpentSeconds = (isKimai ? parseClockDuration(rawDuration) : parseJiraDuration(rawDuration)) ?? 0;
+    const timeSpentSeconds = (source === 'csv' ? parseJiraDuration(rawDuration) : parseClockDuration(rawDuration)) ?? 0;
     if (timeSpentSeconds < 60) {
-      errors.push(`Invalid time spent "${rawDuration}" (expected ${isKimai ? 'H:MM' : 'e.g. 8h, 7h 30m, 45m'})`);
+      errors.push(`Invalid time spent "${rawDuration}" (expected ${DURATION_HINTS[source]})`);
     }
 
     const description = cell(record, columns.description);
-    let issueKey: string;
-    let comment: string;
-    if (isKimai) {
+    let issueKey = '';
+    let comment = '';
+    let commentFromIssueType: boolean | undefined;
+    if (source === 'toggl') {
+      const target = resolveTogglTarget(description, date, administrationIssues);
+      ({ issueKey, comment, commentFromIssueType } = target);
+      if (target.error) {
+        errors.push(target.error);
+      }
+    } else if (source === 'kimai') {
       // Kimai description is just "<KEY> - <task name>"; it is not copied to the worklog comment
       issueKey = ISSUE_KEY_PATTERN.exec(description)?.[0] ?? '';
-      comment = '';
+      if (!issueKey) {
+        errors.push('No Jira issue key at the start of the description');
+      }
     } else {
       issueKey = cell(record, columns.issueKey).toUpperCase();
       comment = description;
+      if (!issueKey) {
+        errors.push('Missing issue key');
+      }
     }
-    if (!issueKey) {
-      errors.push(isKimai ? 'No Jira issue key at the start of the description' : 'Missing issue key');
-    } else if (!ISSUE_KEY_PATTERN.test(issueKey)) {
+    if (issueKey && !ISSUE_KEY_PATTERN.test(issueKey)) {
       errors.push(`Invalid issue key "${issueKey}"`);
     }
 
@@ -236,6 +315,7 @@ export function parseImportCsv(text: string, source: ImportSource): ImportRow[] 
       timeSpentSeconds,
       issueKey,
       comment,
+      commentFromIssueType,
       errors,
     };
   });
